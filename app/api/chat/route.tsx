@@ -7,6 +7,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { HttpResponseOutputParser } from 'langchain/output_parsers';
 import { RunnableSequence } from '@langchain/core/runnables';
+import { transformToDocuments } from '@/lib/utils';
 import { formatDocumentsAsString } from 'langchain/util/document';
 
 interface Pokemon {
@@ -46,10 +47,9 @@ const formatMessage = (message: VercelChatMessage) => {
     return `${message.role}: ${message.content}`;
 };
 
-// Updated prompt template
 const TEMPLATE = `
-Got questions about Pokémon? I’m here to assist! Whether you need guidance on building a team, exploring Pokémon lore, or refining your competitive strategies, just ask.
-
+I’m here to assist! Whether you need guidance on building a team, exploring Pokémon lore, or refining your competitive strategies, just ask.
+If you don't know the answer or most probably if the answer is not formed well to understand it, please ask the user to make the question clearer.
 ==============================
 Context: {context}
 ==============================
@@ -60,12 +60,10 @@ Your Question:
 {question}
 
 Your Response:
-Answer the question immediately.
 If you’re asking about an evolution line: "This Pokémon is preceded by [X] and evolves by [method]. After that, it evolves to [Y] by [method]."
 For team-based questions: "Consider Pokémon with [type coverage] and roles like [roles]. Make it short"
 For subjective questions: "I checked Bulbapedia for information on [subject]. [If available: The information is that [details].] If there's no specific answer, it's considered subjective and open to interpretation."
 `;
-
 
 export async function POST(req: Request): Promise<Response> {
     try {
@@ -75,10 +73,7 @@ export async function POST(req: Request): Promise<Response> {
         const currentMessageContent = messages[messages.length - 1].content;
 
         const docs: Pokemon[] = await fetchAllPokeAPIData();
-        const formattedDocs = docs.map(pokemon => ({
-            name: pokemon.name,
-            url: pokemon.url
-        }));
+        const formattedDocs = transformToDocuments(docs);  // Use the utility function
 
         const prompt = PromptTemplate.fromTemplate(TEMPLATE);
 
@@ -94,13 +89,13 @@ export async function POST(req: Request): Promise<Response> {
 
         const chain = RunnableSequence.from([
             {
-                question: (input: { question: string }) => input.question,
-                chat_history: (input: { chat_history: string }) => input.chat_history,
+                question: (input: { question: string; chat_history: string }) => input.question,
+                chat_history: (input: { question: string; chat_history: string }) => input.chat_history,
                 context: () => formatDocumentsAsString(formattedDocs),
             },
             prompt,
             model,
-            parser,
+            parser, 
         ]);
 
         const stream = await chain.stream({
